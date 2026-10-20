@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101827">
+<title>サイト稼働チェッカー</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1120;--panel:#131d30;--line:#263650;--text:#eef4ff;--muted:#9aabc5;--blue:#76a9ff}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top,#172744 0%,var(--bg) 55%);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+main{width:min(900px,calc(100% - 28px));margin:44px auto}
+header{text-align:center;margin-bottom:28px}
+.logo{font-size:36px}
+h1{font-size:clamp(26px,5vw,38px);margin:4px 0 8px}
+p{color:var(--muted);margin:6px 0}
+.panel{background:rgba(19,29,48,.94);border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 14px 45px #0002}
+label{display:block;font-weight:650;margin-bottom:8px}
+.entry{display:flex;gap:10px}
+input{min-width:0;flex:1;background:#0b1425;color:var(--text);border:1px solid #344761;border-radius:10px;padding:13px 14px;font:inherit}
+button{border:0;border-radius:10px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer;background:var(--blue);color:#071326}
+button:disabled{opacity:.55;cursor:wait}
+.secondary{background:#253650;color:var(--text)}
+.hint{font-size:13px;margin-top:9px}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+.summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.pill{padding:6px 11px;border-radius:999px;background:#202d43;font-size:13px}
+.list{display:grid;gap:10px}
+.site{border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.site-url{font-weight:650;overflow-wrap:anywhere}
+.site-meta{font-size:13px;color:var(--muted);margin-top:4px}
+.status{font-size:13px;font-weight:800;padding:5px 9px;border-radius:999px;white-space:nowrap}
+.up{background:#123b2b;color:#83efb6}.down{background:#48202a;color:#ffabb6}.unknown{background:#40351d;color:#ffe09a}.checking{background:#20395a;color:#a9d0ff}
+.remove{grid-column:1/-1;justify-self:end;padding:6px 10px;font-size:12px}
+.empty{text-align:center;padding:28px 10px;color:var(--muted)}
+.notice{font-size:13px;border-left:3px solid #e7b95b;padding:10px 12px;background:#292719;border-radius:0 8px 8px 0;color:#f5e6b9}
+footer{text-align:center;color:var(--muted);font-size:12px;margin:24px 0}
+@media(max-width:560px){main{margin:24px auto}.panel{padding:16px}.entry{flex-direction:column}.entry button{width:100%}.site{grid-template-columns:1fr}.status{justify-self:start}.remove{grid-column:auto}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="logo">🛰️</div>
+  <h1>サイト稼働チェッカー</h1>
+  <p>URLを入れて、サイトが応答しているかチェックしよう。</p>
+</header>
+
+<section class="panel">
+  <label for="urlInput">チェックしたいURL</label>
+  <div class="entry">
+    <input id="urlInput" type="url" placeholder="https://example.com" autocomplete="url">
+    <button id="addBtn">＋ 追加</button>
+  </div>
+  <p class="hint">https:// から入力してな。URLは複数登録できるで。</p>
+  <div class="actions">
+    <button id="checkBtn">▶ まとめてチェック</button>
+    <button id="demoBtn" class="secondary">サンプルを追加</button>
+    <button id="clearBtn" class="secondary">一覧をクリア</button>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="summary">
+    <span class="pill">登録：<b id="total">0</b></span>
+    <span class="pill">応答あり：<b id="upCount">0</b></span>
+    <span class="pill">応答なし：<b id="downCount">0</b></span>
+    <span class="pill">判定不能：<b id="unknownCount">0</b></span>
+  </div>
+  <div id="sites" class="list"><div class="empty">まだサイトが登録されてへんで。上から追加してな！</div></div>
+  <p class="hint" id="lastChecked">最終チェック：まだ</p>
+</section>
+
+<section class="panel">
+  <h2 style="font-size:18px;margin-top:0">⚠️ 判定について</h2>
+  <div class="notice">GitHub PagesだけのHTMLでは、ブラウザの制限により、すべてのサイトを直接チェックできへん。このツールは外部プロキシ経由で確認するため、プロキシ側の障害や制限で「判定不能」になる場合があるで。</div>
+  <p class="hint">「応答あり」はサイトから応答を受け取れたという意味で、ページの内容が正常かどうかまでは保証せえへん。大事な監視用途なら、専用の監視サービスや自分のサーバー側チェックがおすすめ。</p>
+</section>
+<footer>静的HTML / GitHub Pages対応 ・ 登録情報はこのページを開いている間だけ保持</footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let sites = [];
+const proxy = "https://api.allorigins.win/raw?url=";
+
+function normalizeUrl(value) {
+  let u;
+  try { u = new URL(value.trim()); } catch { throw new Error("URLの形式を確認してな。例：https://example.com"); }
+  if (!["http:", "https:"].includes(u.protocol)) throw new Error("http:// または https:// のURLを使ってな。");
+  return u.href;
+}
+function addSite(value) {
+  const url = normalizeUrl(value);
+  if (sites.some(s => s.url === url)) { alert("そのURLはもう登録済みやで！"); return; }
+  sites.push({id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()), url, status:"未チェック", detail:"", checkedAt:""});
+  render();
+}
+function esc(s) { return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function render() {
+  $("total").textContent = sites.length;
+  $("upCount").textContent = sites.filter(s=>s.status==="応答あり").length;
+  $("downCount").textContent = sites.filter(s=>s.status==="応答なし").length;
+  $("unknownCount").textContent = sites.filter(s=>s.status==="判定不能").length;
+  if (!sites.length) { $("sites").innerHTML = '<div class="empty">まだサイトが登録されてへんで。上から追加してな！</div>'; return; }
+  $("sites").innerHTML = sites.map(s => {
+    const cls = s.status==="応答あり"?"up":s.status==="応答なし"?"down":s.status==="確認中…"?"checking":s.status==="未チェック"?"unknown":"unknown";
+    return `<article class="site">
+      <div><div class="site-url">${esc(s.url)}</div><div class="site-meta">${esc(s.detail || "まだチェックしてへんで")}${s.checkedAt ? " ・ "+esc(s.checkedAt):""}</div></div>
+      <span class="status ${cls}">${esc(s.status)}</span>
+      <button class="secondary remove" data-remove="${esc(s.id)}">削除</button>
+    </article>`;
+  }).join("");
+  $("sites").querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",()=>{sites=sites.filter(s=>s.id!==b.dataset.remove);render();}));
+}
+async function checkSite(site) {
+  site.status="確認中…"; site.detail="外部プロキシに問い合わせ中"; render();
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 10000);
+  try {
+    const res = await fetch(proxy + encodeURIComponent(site.url), {signal:controller.signal, cache:"no-store"});
+    if (res.ok) {
+      site.status="応答あり";
+      site.detail=`プロキシ応答 HTTP ${res.status}`;
+    } else {
+      site.status="判定不能";
+      site.detail=`プロキシ応答 HTTP ${res.status}。対象サイトの状態とは限らへん`;
+    }
+    // Avoid downloading or displaying the target site's page.
+    await res.body?.cancel();
+  } catch (e) {
+    site.status="判定不能";
+    site.detail=e.name==="AbortError"?"10秒でタイムアウト。応答なしとは断定できへん":"通信エラー、CORS、またはプロキシ側の制限";
+  } finally {
+    clearTimeout(timeout);
+    site.checkedAt = new Date().toLocaleString("ja-JP");
+    render();
+  }
+}
+$("addBtn").addEventListener("click",()=>{try{addSite($("urlInput").value);$("urlInput").value="";$("urlInput").focus();}catch(e){alert(e.message);}});
+$("urlInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("addBtn").click();});
+$("checkBtn").addEventListener("click",async()=>{
+  if(!sites.length){alert("先にURLを追加してな！");return;}
+  $("checkBtn").disabled=true;
+  try { for (const site of [...sites]) await checkSite(site); }
+  finally { $("checkBtn").disabled=false; $("lastChecked").textContent="最終チェック："+new Date().toLocaleString("ja-JP"); }
+});
+$("demoBtn").addEventListener("click",()=>{for(const u of ["https://example.com","https://github.com","https://www.wikipedia.org"]){try{if(!sites.some(s=>s.url===u))addSite(u);}catch{}}});
+$("clearBtn").addEventListener("click",()=>{if(confirm("登録したURLを全部消す？")){sites=[];render();$("lastChecked").textContent="最終チェック：まだ";}});
+render();
+</script>
+</body>
+</html>
